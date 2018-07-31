@@ -8,9 +8,10 @@ import torchvision.transforms as transforms
 
 
 class VAE(nn.Module):
+    
     def __init__(self):
         super(VAE,self).__init__()
-        
+        self.latent_dim = 128 
         #Encoder architecture
         self.conv1 = nn.Conv2d(3, 16, kernel_size=3,
                 stride=1,padding=1,bias=False)
@@ -67,6 +68,13 @@ class VAE(nn.Module):
                 stride=2,padding=1,output_padding=1)
         self.d_bn1 = nn.BatchNorm2d(3)
         
+        #Initialization
+        for m in self.modules():
+            if isinstance(m,nn.Conv2d) or isinstance(m,nn.ConvTranspose2d) or isinstance(m,nn.Linear):
+                nn.init.kaiming_normal_(m.weight,mode='fan_out',nonlinearity='relu')
+        nn.init.xavier_normal_(self.fc_mean.weight)
+        nn.init.xavier_normal_(self.fc_logvar.weight)
+
     def encode(self,x):
         conv1 = F.relu(self.bn1(self.conv1(x)))
         conv2 = F.relu(self.bn2(self.conv2(conv1)))
@@ -78,8 +86,17 @@ class VAE(nn.Module):
         fc1 = F.relu(self.bn_fc1(self.fc1(conv7.view(-1,4*4*64))))
         fc2 = F.relu(self.bn_fc2(self.fc2(fc1)))
         mean,logvar = self.fc_mean(fc2),self.fc_logvar(fc2)
-        return mean,logvar,torch.normal(mean,torch.exp(logvar*0.5))
+        return mean,logvar
     
+    def reparametrize(self,mean,logvar):
+        if self.training:
+            eps = torch.randn_like(logvar) #During testing, representation should be spread out
+            std = torch.exp(0.5*logvar) #hence the name variational autoencoder
+            z = mean + eps*std
+            return z
+        else:
+            return mean #During testing you want to return the peak of the normal to minimise loss
+
     def decode(self,z):
         d_fc2 = F.relu(self.d_bn_fc2(self.d_fc2(z)))
         d_fc1 = F.relu(self.d_bn_fc1(self.d_fc1(d_fc2)))
@@ -90,15 +107,43 @@ class VAE(nn.Module):
         d_conv3 = F.relu(self.d_bn3(self.d_conv3(d_conv4)))
         d_conv2 = F.relu(self.d_bn2(self.d_conv2(d_conv3)))
         return F.relu(self.d_bn1(self.d_conv1(d_conv2))) 
+    
+    def forward(self,x):
+        mean,logvar = self.encode(x)
+        z = self.reparametrize(mean,logvar)
+        return self.decode(z),mean,logvar
+
+    def generate_random(self):
+        z = torch.randn((1,self.latent_dim))
+        return self.decode(z)
 
 class Trainer(object):
-    def __init__(self,model,trainloader,testloader,epochs,batch_size,checkpoints):
+    def __init__(self,model,device,trainloader,testloader,epochs,batch_size,checkpoints):
         self.trainloader = trainloader
         self.testloader = testloader
+        self.start_epoch = 0
         self.epochs = epochs
         self.batch_size = batch_size
         self.model = model
         self.checkpoints = checkpoints
+        
+        torch.save({
+            'epoch' : epoch,
+            'state_dict' : self.model.state_dict(),
+            'optimizer' : self.optimizer.state_dict()},
+            self.checkpoints)
+        
+    def load_checkpoint(self):
+        try:
+            print("Loading Checkpoint from '{}'".format(self.checkpoints))
+            checkpoint = torch.load(self.checkpoints)
+            self.start_epoch = checkpoint['epoch']
+            self.model.load_state_dict(checkpoint['state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer'])
+            print("Resuming Training From Epoch {}".format(self.start_epoch))
+        except:
+            print("No Checkpoint Exists At '{}'.Start Fresh Training".format(self.checkpoints))
+            self.start_epoch = 0
 
-    def save_checkpoint(self,best=False):
-        torch.save()
+    def train(self):
+        
