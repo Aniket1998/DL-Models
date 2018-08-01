@@ -119,7 +119,9 @@ class VAE(nn.Module):
         return self.decode(z)
 
 def kl_crossentropy(original,recon,mean,logvar):
-    bce = F.binary_cross_entropy(recon.view(-1,32*32*3),original.view(-1,32*32*3))
+    recon2 = recon.view(-1,32*32*3)
+    original2 = original.view(-1,32*32*3)
+    bce = F.binary_cross_entropy_with_logits(recon2,original2,size_average=False)
     kld = -0.5 * torch.sum(1 + logvar - torch.pow(mu,2) - torch.exp(logvar))
     return bce+kld
 
