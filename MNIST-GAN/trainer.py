@@ -26,10 +26,10 @@ class GANTrainer(object):
         self.optimG = optim.Adam(self.G.parameters(), self.lr)
         self.optimD = optim.Adam(self.G.parameters(), self.lr)
         self.loss = nn.BCEWithLogitsLoss()
-        self.target_fake = torch.zeros(self.batch_size,128,device=self.device)
-        self.target_real = torch.ones(self.batch_size,128,device=self.device)
+        self.target_fake = 0.3 * torch.rand(self.batch_size,128) #See Soumith Chintala ganhacks NIPS2016 : Having soft labels instead of hard helps
+        self.target_real = 1 - self.target_fake
+        self.test_noise = torch.randn(32,128,device=self.device) #While evaluating during training, the noise input for image generation is fixed
         self.writer = SummaryWriter()
-        self.cpu = torch.device('cpu')
 
     def save_model(self, epoch):
         print("Saving Model at '{}'".format(self.path))
@@ -53,20 +53,17 @@ class GANTrainer(object):
         self.optimD.load_state_dict(model['d_optimizer'])
         self.start_epoch = model['epoch']
 
-    def sample_images(self,epoch,samples):
-        self.G.eval()
-        self.D.eval()
-        noise = torch.randn(samples,128,device=self.device)
-        images = self.G(noise)
-        img = torchvision.utils.make_grid(images,nrow=8)
+    def sample_images(self,epoch):
+        images = self.G(self.test_noise)
+        img = torchvision.utils.make_grid(images)
         self.writer.add_image("Epoch {}".format(epoch),img,epoch)
         torchvision.utils.save_image(images,"%s/epoch%d.png" % (self.images,epoch+1),nrow=8)
 
     def train(self):
-        self.G.train()
-        self.D.train()
         for epoch in range(self.start_epoch, self.epochs+1):
-            print("Epoch {}".format(epoch))
+            print("Epoch %d of %d" % (epoch,self.epochs))
+            running_G_loss = 0.0
+            running_D_loss = 0.0
             for i, data in tqdm.tqdm(enumerate(self.loader, 1)):
                 images,_ = data
                 images = images.to(self.device) 
@@ -92,9 +89,11 @@ class GANTrainer(object):
                 #Log the generator and the discriminator losses 
                 self.writer.add_scalar('Generator Loss',loss_fake_g.item(),i*(epoch+1))
                 self.writer.add_scalar('Discriminator Loss',loss_real.item() + loss_fake.item(),i*(epoch+1))
+                running_G_loss += loss_fake_g.item()
+                running_D_loss += loss_real.item() + loss_fake.item()
+            print("Generator Loss : {} Discriminator Loss : {}".format(running_G_loss/i,running_D_loss/i))
+            running_D_loss = running_G_loss = 0.0
             print("Saving checkpoints....")
             self.save_model(epoch)
             print("Sampling and saving images")
-            self.sample_images(epoch,16)
-            self.G.train()
-            self.D.train()
+            self.sample_images(epoch)

@@ -23,13 +23,13 @@ class Generator(nn.Module):
                 torch.nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.Linear):
                 torch.nn.init.kaiming_normal_(m.weight)
-            torch.nn.init.xavier_uniform_(self.fc4.weight,gain=4)
+            torch.nn.init.xavier_normal_(self.fc4.weight,gain=torch.nn.init.calculate_gain('tanh')) #c.f. Bengio and Glorot for Sigmoid
 
     def forward(self, x):
-        x = F.leaky_relu(self.bn1(self.fc1(x)))
-        x = F.leaky_relu(self.bn2(self.fc2(x)))
-        x = F.leaky_relu(self.bn3(self.fc3(x)))
-        x = F.sigmoid(self.bn4(self.fc4(x))) #Images are in the range (0,1) hence so should be the generator outputs
+        x = F.leaky_relu(self.bn1(self.fc1(x)),0.2)
+        x = F.leaky_relu(self.bn2(self.fc2(x)),0.2)
+        x = F.leaky_relu(self.bn3(self.fc3(x)),0.2)
+        x = F.tanh(self.bn4(self.fc4(x))) #Chintala NIPS2016 : Normalize inputs in -1 to 1 and then use tanh layer in generator 
         x = x.reshape(-1,28,28)
         return x.unsqueeze(1)
 
@@ -63,8 +63,8 @@ class Discriminator(nn.Module):
     def forward(self, x):
         x = torch.unsqueeze(x,1)
         x = x.reshape(-1,28*28)
-        x = self.drop1(F.leaky_relu(self.bn1(self.fc1(x))))
-        x = self.drop2(F.leaky_relu(self.bn2(self.fc2(x))))
-        x = self.drop3(F.leaky_relu(self.bn3(self.fc3(x))))
-        x = F.leaky_relu(self.bn4(self.fc4(x)))
+        x = self.drop1(F.leaky_relu(self.bn1(self.fc1(x)),0.2))
+        x = self.drop2(F.leaky_relu(self.bn2(self.fc2(x)),0.2))
+        x = self.drop3(F.leaky_relu(self.bn3(self.fc3(x)),0.2))
+        x = F.leaky_relu(self.bn4(self.fc4(x)),0.2)
         return x
