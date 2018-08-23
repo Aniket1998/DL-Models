@@ -1,2 +1,2 @@
-# Neural-Network-Architectures
-Neural network architectures that I've implemented.
+# DL-Models 
+Some standard Deep Learning models that I've implemented
