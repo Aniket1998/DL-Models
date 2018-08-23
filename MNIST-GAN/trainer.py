@@ -1,0 +1,100 @@
+import tqdm
+from tensorboardX import SummaryWriter
+import torch
+import torchvision
+import torch.nn as nn
+import torch.optim as optim
+import torch.utils
+
+
+class GANTrainer(object):
+    def __init__(self,device,G,D,dataset,batch_size,epochs,lr,model,images):
+        self.G = G
+        self.D = D
+        self.device = device
+        self.G.to(self.device)
+        self.D.to(self.device)
+        self.dataset = dataset
+        self.loader = torch.utils.data.DataLoader(self.dataset, batch_size=batch_size,
+                                                 shuffle=True, num_workers=4)
+        self.batch_size = batch_size
+        self.lr = lr
+        self.path = model
+        self.images = images
+        self.epochs = epochs   
+        self.start_epoch = 0
+        self.optimG = optim.Adam(self.G.parameters(), self.lr)
+        self.optimD = optim.Adam(self.G.parameters(), self.lr)
+        self.loss = nn.BCEWithLogitsLoss()
+        self.target_fake = torch.zeros(self.batch_size,128,device=self.device)
+        self.target_real = torch.ones(self.batch_size,128,device=self.device)
+        self.writer = SummaryWriter()
+        self.cpu = torch.device('cpu')
+
+    def save_model(self, epoch):
+        print("Saving Model at '{}'".format(self.path))
+        try:
+            model = {
+                    'epoch': epoch+1,
+                    'generator': self.G.state_dict(),
+                    'discriminator': self.D.state_dict(),
+                    'g_optimizer': self.optimG.state_dict(),
+                    'd_optimizer': self.optimD.state_dict()
+                    }
+            torch.save(model, self.path)
+        except:
+            print("Unable to load model from '{}'. Training from scratch.".format(self.path))
+    
+    def load_model(self):
+        model = torch.load(self.path)
+        self.G.load_state_dict(model['generator'])
+        self.D.load_state_dict(model['discriminator'])
+        self.optimG.load_state_dict(model['g_optimizer'])
+        self.optimD.load_state_dict(model['d_optimizer'])
+        self.start_epoch = model['epoch']
+
+    def sample_images(self,epoch,samples):
+        self.G.eval()
+        self.D.eval()
+        noise = torch.randn(samples,128,device=self.device)
+        images = self.G(noise)
+        img = torchvision.utils.make_grid(images,nrow=8)
+        self.writer.add_image("Epoch {}".format(epoch),img,epoch)
+        torchvision.utils.save_image(images,"%s/epoch%d.png" % (self.images,epoch+1),nrow=8)
+
+    def train(self):
+        self.G.train()
+        self.D.train()
+        for epoch in range(self.start_epoch, self.epochs+1):
+            print("Epoch {}".format(epoch))
+            for i, data in tqdm.tqdm(enumerate(self.loader, 1)):
+                images,_ = data
+                images = images.to(self.device) 
+                #Update weights of the discriminator D(x)
+                self.optimD.zero_grad()
+                noise = torch.randn(self.batch_size,128,device=self.device) 
+                fake = self.G(noise) #G(z) for training the discriminator
+                d_fake = self.D(fake.detach()) #Since we are just training the discriminator, computing gradients wrt G(z) has no point hence we can treat G(Z) as fixed input
+                loss_fake = self.loss(d_fake,self.target_fake) # Gradient descent on -log(1-D(G(z)) 
+                loss_fake.backward()
+                d_real = self.D(images)
+                loss_real = self.loss(d_real,self.target_real) #Gradient descent on -log(D(x))
+                loss_real.backward()
+                self.optimD.step()
+                #Update weights of the generator G(z)
+                self.optimG.zero_grad()
+                noise_g = torch.randn(self.batch_size,128,device=self.device)
+                fake_g = self.G(noise_g)
+                d_fake_g = self.D(fake_g) #Here we actually update the weights of G(z) hence we cannot treat G(z) as a fixed input and detach it from computational graph
+                loss_fake_g = self.loss(d_fake_g,self.target_real) # Gradient descent on log(1 - D(G(z)) is the same as gradient descent on -log(D(G(z))
+                loss_fake_g.backward()
+                self.optimG.step()
+                #Log the generator and the discriminator losses 
+                self.writer.add_scalar('Generator Loss',loss_fake_g.item(),i*(epoch+1))
+                self.writer.add_scalar('Discriminator Loss',loss_real.item() + loss_fake.item(),i*(epoch+1))
+            print("Saving checkpoints....")
+            self.save_model(epoch)
+            print("Sampling and saving images")
+            self.sample_images(epoch,16)
+            self.G.train()
+            self.D.train()
