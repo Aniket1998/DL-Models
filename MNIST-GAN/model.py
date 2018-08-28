@@ -8,14 +8,18 @@ import torch.nn.functional as F
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
-        self.fc1 = nn.Linear(128, 256)
-        self.bn1 = nn.BatchNorm1d(256)
-        self.fc2 = nn.Linear(256, 512)
-        self.bn2 = nn.BatchNorm1d(512)
-        self.fc3 = nn.Linear(512, 1024)
-        self.bn3 = nn.BatchNorm1d(1024)
-        self.fc4 = nn.Linear(1024, 28*28)
-        self.bn4 = nn.BatchNorm1d(28*28)
+        self.fc1 = nn.Linear(64, 128)
+        self.bn1 = nn.BatchNorm1d(128)
+        self.fc2 = nn.Linear(128, 256)
+        self.bn2 = nn.BatchNorm1d(256)
+        self.fc3 = nn.Linear(256, 512)
+        self.bn3 = nn.BatchNorm1d(512)
+        self.fc4 = nn.Linear(512, 1024)
+        self.bn4 = nn.BatchNorm1d(1024)
+        self.fc5 = nn.Linear(1024,2048)
+        self.bn5 = nn.BatchNorm1d(2048)
+        self.fc6 = nn.Linear(2048,28*28)
+
         
         for m in self.modules():
             if isinstance(m, nn.BatchNorm1d):
@@ -29,7 +33,9 @@ class Generator(nn.Module):
         x = F.leaky_relu(self.bn1(self.fc1(x)),0.2)
         x = F.leaky_relu(self.bn2(self.fc2(x)),0.2)
         x = F.leaky_relu(self.bn3(self.fc3(x)),0.2)
-        x = F.tanh(self.bn4(self.fc4(x))) #Chintala NIPS2016 : Normalize inputs in -1 to 1 and then use tanh layer in generator 
+        x = F.leaky_relu(self.bn4(self.fc4(x)),0.2)
+        x = F.leaky_relu(self.bn5(self.fc5(x)),0.2)
+        x = F.tanh(self.fc6(x))#Chintala NIPS2016 : Normalize inputs in -1 to 1 and then use tanh layer in generator 
         x = x.reshape(-1,28,28)
         return x.unsqueeze(1)
 
@@ -41,17 +47,15 @@ class Generator(nn.Module):
 class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
-        self.fc1 = nn.Linear(28*28, 1024)
-        self.bn1 = nn.BatchNorm1d(1024)
-        self.drop1 = nn.Dropout(p=0.3)
-        self.fc2 = nn.Linear(1024, 512)
-        self.bn2 = nn.BatchNorm1d(512)
-        self.drop2 = nn.Dropout(p=0.3)
-        self.fc3 = nn.Linear(512, 256)
-        self.bn3 = nn.BatchNorm1d(256)
-        self.drop3 = nn.Dropout(p=0.3)
-        self.fc4 = nn.Linear(256, 128)
-        self.bn4 = nn.BatchNorm1d(128)
+        self.fc1 = nn.Linear(28*28,256)
+        self.drop1 = nn.Dropout(p=0.5)
+        self.fc2 = nn.Linear(256, 128)
+        self.bn2 = nn.BatchNorm1d(128)
+        self.drop2 = nn.Dropout(p=0.5)
+        self.fc3 = nn.Linear(128,32)
+        self.bn3 = nn.BatchNorm1d(32)
+        self.drop3 = nn.Dropout(p=0.5)
+        self.fc4 = nn.Linear(32,1)
 
         for m in self.modules():
             if isinstance(m, nn.BatchNorm1d):
@@ -59,12 +63,13 @@ class Discriminator(nn.Module):
                 torch.nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.Linear):
                 torch.nn.init.kaiming_normal_(m.weight)
+        torch.nn.init.xavier_normal_(self.fc4.weight,torch.nn.init.calculate_gain('sigmoid'))
 
     def forward(self, x):
         x = torch.unsqueeze(x,1)
         x = x.reshape(-1,28*28)
-        x = self.drop1(F.leaky_relu(self.bn1(self.fc1(x)),0.2))
+        x = self.drop1(F.leaky_relu(self.fc1(x),0.2))
         x = self.drop2(F.leaky_relu(self.bn2(self.fc2(x)),0.2))
         x = self.drop3(F.leaky_relu(self.bn3(self.fc3(x)),0.2))
-        x = F.leaky_relu(self.bn4(self.fc4(x)),0.2)
-        return x
+        x = F.sigmoid(self.fc4(x))
+        return torch.squeeze(x,1)

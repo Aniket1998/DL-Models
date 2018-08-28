@@ -16,7 +16,7 @@ class GANTrainer(object):
         self.D.to(self.device)
         self.dataset = dataset
         self.loader = torch.utils.data.DataLoader(self.dataset, batch_size=batch_size,
-                                                 shuffle=False, num_workers=4)
+                                                 shuffle=True, num_workers=4)
         self.batch_size = batch_size
         self.lr = lr
         self.path = model
@@ -24,13 +24,11 @@ class GANTrainer(object):
         self.epochs = epochs   
         self.start_epoch = 0
         self.optimG = optim.Adam(self.G.parameters(), self.lr)
-        self.optimD = optim.Adam(self.D.parameters(),self.lr)
+        self.optimD = optim.Adam(self.G.parameters(), self.lr)
         self.loss = nn.BCELoss()
-        self.target_real_g = torch.ones(self.batch_size,device=self.device)
-        self.target_fake_g = torch.zeros(self.batch_size,device=self.device)
-        self.target_real = 0.7 * torch.rand(self.batch_size,device=self.device) #See Soumith Chintala ganhacks NIPS2016 : Having soft labels instead of hard helps
-        self.target_fake = torch.zeros(self.batch_size,device=self.device)
-        self.test_noise = torch.randn(32,64,device=self.device) #While evaluating during training, the noise input for image generation is fixed
+        self.target_fake = 0.3 * torch.rand(self.batch_size,128,device=self.device) #See Soumith Chintala ganhacks NIPS2016 : Having soft labels instead of hard helps
+        self.target_real = 1 - self.target_fake
+        self.test_noise = torch.randn(32,128,device=self.device) #While evaluating during training, the noise input for image generation is fixed
         self.losses_g = []
         self.losses_d = []
         self.writer = SummaryWriter()
@@ -58,15 +56,12 @@ class GANTrainer(object):
         self.start_epoch = model['epoch']
 
     def sample_images(self,epoch):
-        with torch.no_grad():
-            images = self.G(self.test_noise)
-            img = torchvision.utils.make_grid(images)
-            self.writer.add_image("Epoch {}".format(epoch),img,epoch)
-            torchvision.utils.save_image(images,"%s/epoch%d.png" % (self.images,epoch+1),nrow=8,normalize=True)
+        images = self.G(self.test_noise)
+        img = torchvision.utils.make_grid(images,normalize=True)
+        self.writer.add_image("Epoch {}".format(epoch),img,epoch)
+        torchvision.utils.save_image(images,"%s/epoch%d.png" % (self.images,epoch+1),nrow=8,normalize=True)
 
     def train(self):
-        self.G.train()
-        self.D.train()
         for epoch in range(self.start_epoch, self.epochs+1):
             print("Epoch %d of %d" % (epoch,self.epochs))
             running_G_loss = 0.0
@@ -77,29 +72,20 @@ class GANTrainer(object):
                 #Update weights of the discriminator D(x)
                 self.optimD.zero_grad()
                 d_real = self.D(images)
-                p = torch.rand(1).item() >= 0.1
-                loss_real = 0;
-                if p is True:
-                    loss_real = self.loss(d_real,self.target_real) #Gradient descent on -log(D(x))
-                else:
-                    loss_real = self.loss(d_real,self.target_fake) #Gradient descent on -log(D(x))
+                loss_real = self.loss(d_real,self.target_real) #Gradient descent on -log(D(x))
                 loss_real.backward()
-                noise = torch.randn(self.batch_size,64,device=self.device) 
+                noise = torch.randn(self.batch_size,128,device=self.device) 
                 fake = self.G(noise) #G(z) for training the discriminator
                 d_fake = self.D(fake.detach()) #Since we are just training the discriminator, computing gradients wrt G(z) has no point hence we can treat G(Z) as fixed input
-                loss_fake = 0
-                if p is True:
-                    loss_fake = self.loss(d_fake,self.target_fake) # Gradient descent on -log(1-D(G(z)) 
-                else:
-                    loss_fake = self.loss(d_fake,self.target_real) # Gradient descent on -log(1-D(G(z)) 
+                loss_fake = self.loss(d_fake,self.target_fake) # Gradient descent on -log(1-D(G(z)) 
                 loss_fake.backward()
                 self.optimD.step()
                 #Update weights of the generator G(z)
                 self.optimG.zero_grad()
-                noise_g = torch.randn(self.batch_size,64,device=self.device)
+                noise_g = torch.randn(self.batch_size,128,device=self.device)
                 fake_g = self.G(noise_g)
                 d_fake_g = self.D(fake_g) #Here we actually update the weights of G(z) hence we cannot treat G(z) as a fixed input and detach it from computational graph
-                loss_fake_g = self.loss(d_fake_g,self.target_real_g) # Gradient descent on log(1 - D(G(z)) is the same as gradient descent on -log(D(G(z))
+                loss_fake_g = self.loss(d_fake_g,self.target_real) # Gradient descent on log(1 - D(G(z)) is the same as gradient descent on -log(D(G(z))
                 loss_fake_g.backward()
                 self.optimG.step()
                 #Log the generator and the discriminator losses 
@@ -112,10 +98,7 @@ class GANTrainer(object):
                     self.losses_g.append(running_G_loss)
                     self.losses_d.append(running_D_loss)
                     running_D_loss = running_G_loss = 0.0
+            print("Saving checkpoints....")
             self.save_model(epoch)
-            self.G.eval()
-            self.D.eval()
             print("Sampling and saving images")
             self.sample_images(epoch)
-            self.G.train()
-            self.D.train()
